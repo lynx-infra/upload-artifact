@@ -37903,20 +37903,68 @@ exports.DefaultArtifactClient = DefaultArtifactClient;
 /***/ }),
 
 /***/ 93971:
-/***/ ((__unused_webpack_module, exports) => {
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
 
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.objectKeyPrefix = exports.secretkey = exports.accesskey = exports.region = exports.endpoint = exports.runId = exports.repoName = exports.bucketName = void 0;
-exports.bucketName = process.env['BUCKET_NAME'];
+exports.defaultObjectKeyPrefix = exports.secretkey = exports.accesskey = exports.region = exports.endpoint = exports.runId = exports.repoName = exports.bucketName = void 0;
+const fs_1 = __nccwpck_require__(57147);
+const path_1 = __nccwpck_require__(71017);
+const core = __importStar(__nccwpck_require__(73861));
+const credentials = new Map();
+const credentialsPath = process.env["TOS_CREDENTIALS_PATH"] || "/etc/tos-credentials";
+function getCredentials(key) {
+    if (process.env[`TOS_${key}`]) {
+        return process.env[`TOS_${key}`];
+    }
+    if (credentials.size > 0) {
+        return credentials.get(`TOS_${key}`);
+    }
+    if (credentialsPath === undefined) {
+        throw new Error("credentials file path not specified");
+    }
+    try {
+        const credentialsFile = (0, path_1.join)(credentialsPath, `TOS_${key}`);
+        const value = (0, fs_1.readFileSync)(credentialsFile, "utf8").trim();
+        return value;
+    }
+    catch (error) {
+        core.error("an error occurred when reading credentials file", error);
+        throw new Error(`Error loading credentials: ${error.message}`);
+    }
+}
+exports.bucketName = getCredentials('BUCKET_NAME');
 exports.repoName = process.env['GITHUB_REPOSITORY'];
 exports.runId = process.env['GITHUB_RUN_ID'];
-exports.endpoint = process.env['ENDPOINT'];
-exports.region = process.env['REGION'];
-exports.accesskey = process.env['ACCESS_KEY'];
-exports.secretkey = process.env['SECRET_KEY'];
-exports.objectKeyPrefix = `artifacts/${exports.repoName}/${exports.runId}`;
+exports.endpoint = getCredentials('ENDPOINT');
+exports.region = getCredentials('REGION');
+exports.accesskey = getCredentials('ACCESS_KEY');
+exports.secretkey = getCredentials('SECRET_KEY');
+exports.defaultObjectKeyPrefix = `artifacts/${exports.repoName}/${exports.runId}`;
 //# sourceMappingURL=constants.js.map
 
 /***/ }),
@@ -38264,7 +38312,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.downloadArtifactInternal = void 0;
+exports.downloadArtifactInternal = exports.downloadArtifactPublic = void 0;
 const fs_1 = __nccwpck_require__(57147);
 const core = __importStar(__nccwpck_require__(73861));
 const path = __importStar(__nccwpck_require__(71017));
@@ -38290,9 +38338,25 @@ function exists(path) {
         }
     });
 }
-function downloadArtifactInternal(artifactId, options) {
+function downloadArtifactPublic(repositoryOwner, repositoryName, workflowRunId, options) {
     return __awaiter(this, void 0, void 0, function* () {
         const downloadPath = yield resolveOrCreateDirectory(options === null || options === void 0 ? void 0 : options.path);
+        const prefix = `artifacts/${repositoryOwner}/${repositoryName}/${workflowRunId}`;
+        yield downloadArtifactFromTOS(downloadPath, prefix, options);
+        return { downloadPath };
+    });
+}
+exports.downloadArtifactPublic = downloadArtifactPublic;
+function downloadArtifactInternal(options) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const downloadPath = yield resolveOrCreateDirectory(options === null || options === void 0 ? void 0 : options.path);
+        yield downloadArtifactFromTOS(downloadPath, constants_1.defaultObjectKeyPrefix, options);
+        return { downloadPath };
+    });
+}
+exports.downloadArtifactInternal = downloadArtifactInternal;
+function downloadArtifactFromTOS(downloadPath, prefix, options) {
+    return __awaiter(this, void 0, void 0, function* () {
         const artifactClient = new volc_client_1.DefaultArtifactClient();
         const tosClient = yield (0, tos_client_1.createObjectStorageClient)();
         let artifacts = [];
@@ -38304,7 +38368,7 @@ function downloadArtifactInternal(artifactId, options) {
             artifacts = (yield artifactClient.listArtifacts()).artifacts;
         }
         if (artifacts.length === 0) {
-            throw new errors_1.ArtifactNotFoundError(`No artifacts found for ID: ${artifactId}\nAre you trying to download from a different run? Try specifying a github-token with \`actions:read\` scope.`);
+            throw new errors_1.ArtifactNotFoundError(`No artifacts found for name: ${options === null || options === void 0 ? void 0 : options.artifactName}`);
         }
         if (artifacts.length > 1) {
             core.warning('Multiple artifacts found, defaulting to first.');
@@ -38312,7 +38376,7 @@ function downloadArtifactInternal(artifactId, options) {
         try {
             core.info(`Starting download of artifact to: ${downloadPath}`);
             const fileName = `${artifacts[0].name}.zip`;
-            const objectKey = `${constants_1.objectKeyPrefix}/${fileName}`;
+            const objectKey = `${prefix}/${fileName}`;
             const filePath = path.join(downloadPath, fileName);
             yield tosClient.getObjectToFile({
                 bucket: constants_1.bucketName,
@@ -38327,10 +38391,8 @@ function downloadArtifactInternal(artifactId, options) {
             (0, tos_client_1.handleError)(error);
             throw new Error(`Unable to download and extract artifact: ${error.message}`);
         }
-        return { downloadPath };
     });
 }
-exports.downloadArtifactInternal = downloadArtifactInternal;
 function resolveOrCreateDirectory() {
     return __awaiter(this, arguments, void 0, function* (downloadPath = (0, config_1.getGitHubWorkspaceDir)()) {
         if (!(yield exists(downloadPath))) {
@@ -38694,15 +38756,29 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.getArtifactInternal = void 0;
+exports.getArtifactInternal = exports.getArtifactPublic = void 0;
 const errors_1 = __nccwpck_require__(73916);
 const tos_client_1 = __nccwpck_require__(94514);
 const constants_1 = __nccwpck_require__(93971);
+function getArtifactPublic(artifactName, workflowRunId, repositoryOwner, repositoryName) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const fileName = `${artifactName}.zip`;
+        const objectKey = `artifacts/${repositoryOwner}/${repositoryName}/${workflowRunId}/${fileName}`;
+        return yield getArtifactFromTOS(artifactName, objectKey);
+    });
+}
+exports.getArtifactPublic = getArtifactPublic;
 function getArtifactInternal(artifactName) {
     return __awaiter(this, void 0, void 0, function* () {
-        const client = yield (0, tos_client_1.createObjectStorageClient)();
         const fileName = `${artifactName}.zip`;
-        const objectKey = `${constants_1.objectKeyPrefix}/${fileName}`;
+        const objectKey = `${constants_1.defaultObjectKeyPrefix}/${fileName}`;
+        return yield getArtifactFromTOS(artifactName, objectKey);
+    });
+}
+exports.getArtifactInternal = getArtifactInternal;
+function getArtifactFromTOS(artifactName, objectKey) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const client = yield (0, tos_client_1.createObjectStorageClient)();
         let data = {};
         try {
             data = yield client.headObject({
@@ -38726,7 +38802,6 @@ function getArtifactInternal(artifactName) {
         };
     });
 }
-exports.getArtifactInternal = getArtifactInternal;
 //# sourceMappingURL=volc-get-artifact.js.map
 
 /***/ }),
@@ -38746,24 +38821,43 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.listArtifactsInternal = void 0;
+exports.listArtifactsFromTOS = exports.listArtifactsInternal = exports.listArtifactsPublic = void 0;
 const core_1 = __nccwpck_require__(73861);
 const tos_client_1 = __nccwpck_require__(94514);
 const constants_1 = __nccwpck_require__(93971);
 // Limiting to 1000 for perf reasons
 const maximumArtifactCount = 1000;
+function listArtifactsPublic(workflowRunId_1, repositoryOwner_1, repositoryName_1) {
+    return __awaiter(this, arguments, void 0, function* (workflowRunId, repositoryOwner, repositoryName, latest = false) {
+        const prefix = `artifacts/${repositoryOwner}/${repositoryName}/${workflowRunId}`;
+        const artifacts = yield listArtifactsFromTOS(prefix, latest);
+        return {
+            artifacts
+        };
+    });
+}
+exports.listArtifactsPublic = listArtifactsPublic;
 function listArtifactsInternal() {
     return __awaiter(this, arguments, void 0, function* (latest = false) {
+        const artifacts = yield listArtifactsFromTOS(constants_1.defaultObjectKeyPrefix, latest);
+        return {
+            artifacts
+        };
+    });
+}
+exports.listArtifactsInternal = listArtifactsInternal;
+function listArtifactsFromTOS(prefix_1) {
+    return __awaiter(this, arguments, void 0, function* (prefix, latest = false) {
         const client = yield (0, tos_client_1.createObjectStorageClient)();
         let artifacts = [];
         try {
             const { data } = yield client.listObjectsType2({
                 bucket: constants_1.bucketName,
                 maxKeys: maximumArtifactCount,
-                prefix: constants_1.objectKeyPrefix
+                prefix
             });
             for (const obj of data.Contents) {
-                const artifactName = obj.Key.slice(constants_1.objectKeyPrefix.length + 1, obj.Key.length - 4);
+                const artifactName = obj.Key.slice(constants_1.defaultObjectKeyPrefix.length + 1, obj.Key.length - 4);
                 artifacts.push({
                     name: artifactName,
                     id: 0,
@@ -38778,12 +38872,10 @@ function listArtifactsInternal() {
             artifacts = filterLatest(artifacts);
         }
         (0, core_1.info)(`Found ${artifacts.length} artifact(s)`);
-        return {
-            artifacts
-        };
+        return artifacts;
     });
 }
-exports.listArtifactsInternal = listArtifactsInternal;
+exports.listArtifactsFromTOS = listArtifactsFromTOS;
 /**
  * Filters a list of artifacts to only include the latest artifact for each name
  * @param artifacts The artifacts to filter
@@ -39863,7 +39955,7 @@ function uploadArtifact(name, files, rootDirectory, options) {
         }
         const client = yield (0, tos_client_1.createObjectStorageClient)();
         const fileName = `${name}.zip`;
-        const objectKey = `${constants_1.objectKeyPrefix}/${fileName}`;
+        const objectKey = `${constants_1.defaultObjectKeyPrefix}/${fileName}`;
         const zipUploadStream = yield (0, zip_1.createZipUploadStream)(zipSpecification, options === null || options === void 0 ? void 0 : options.compressionLevel);
         try {
             yield client.putObject({
@@ -40031,6 +40123,17 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __rest = (this && this.__rest) || function (s, e) {
+    var t = {};
+    for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p) && e.indexOf(p) < 0)
+        t[p] = s[p];
+    if (s != null && typeof Object.getOwnPropertySymbols === "function")
+        for (var i = 0, p = Object.getOwnPropertySymbols(s); i < p.length; i++) {
+            if (e.indexOf(p[i]) < 0 && Object.prototype.propertyIsEnumerable.call(s, p[i]))
+                t[p[i]] = s[p[i]];
+        }
+    return t;
+};
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.DefaultArtifactClient = void 0;
 const core_1 = __nccwpck_require__(73861);
@@ -40058,7 +40161,11 @@ If the error persists, please check whether Actions is operating normally at [ht
     downloadArtifact(artifactId, options) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
-                return (0, volc_download_artifact_1.downloadArtifactInternal)(artifactId, options);
+                if (options === null || options === void 0 ? void 0 : options.findBy) {
+                    const { findBy: { repositoryOwner, repositoryName, workflowRunId } } = options, downloadOptions = __rest(options, ["findBy"]);
+                    return (0, volc_download_artifact_1.downloadArtifactPublic)(repositoryOwner, repositoryName, workflowRunId, downloadOptions);
+                }
+                return (0, volc_download_artifact_1.downloadArtifactInternal)(options);
             }
             catch (error) {
                 (0, core_1.warning)(`Download Artifact failed with error: ${error}.
@@ -40073,6 +40180,10 @@ If the error persists, please check whether Actions and API requests are operati
     listArtifacts(options) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
+                if (options === null || options === void 0 ? void 0 : options.findBy) {
+                    const { findBy: { workflowRunId, repositoryOwner, repositoryName } } = options;
+                    return (0, volc_list_artifacts_1.listArtifactsPublic)(workflowRunId, repositoryOwner, repositoryName, options === null || options === void 0 ? void 0 : options.latest);
+                }
                 return (0, volc_list_artifacts_1.listArtifactsInternal)(options === null || options === void 0 ? void 0 : options.latest);
             }
             catch (error) {
@@ -40088,6 +40199,10 @@ If the error persists, please check whether Actions and API requests are operati
     getArtifact(artifactName, options) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
+                if (options === null || options === void 0 ? void 0 : options.findBy) {
+                    const { findBy: { workflowRunId, repositoryOwner, repositoryName } } = options;
+                    return (0, volc_get_artifact_1.getArtifactPublic)(artifactName, workflowRunId, repositoryOwner, repositoryName);
+                }
                 return (0, volc_get_artifact_1.getArtifactInternal)(artifactName);
             }
             catch (error) {
